@@ -1,0 +1,66 @@
+version: 2
+
+project_name: ssh-tunnel-daemon
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ssh-tunnel-daemon
+    main: ./cmd/ssh-tunnel-daemon
+    binary: ssh-tunnel-daemon
+    ldflags:
+      - -s -w -X github.com/northwang-lucky/ssh-tunnel-daemon/internal/version.Version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  groups:
+    - title: Features
+      regexp: '^feat.*'
+      order: 0
+    - title: "Bug Fixes"
+      regexp: '^fix.*'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  prerelease: auto
+
+brews:
+  - name: ssh-tunnel-daemon
+    repository:
+      owner: northwang-lucky
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/northwang-lucky/ssh-tunnel-daemon"
+    description: "CLI tool for managing SSH tunnels"
+    license: "MIT"
+    install: |
+      bin.install "ssh-tunnel-daemon"
+      bin.install_symlink "ssh-tunnel-daemon" => "sshtnl"
+      bin.install_symlink "ssh-tunnel-daemon" => "s17n"

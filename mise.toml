@@ -2,9 +2,24 @@
 go = "1.26.3"
 
 [tasks.build]
-description = "构建二进制文件到 bin/ssh-tunnel-daemon"
-run = "go build -o bin/ssh-tunnel-daemon ./cmd/ssh-tunnel-daemon"
+run = "go build -ldflags \"-s -w -X github.com/northwang-lucky/ssh-tunnel-daemon/internal/version.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)\" -o bin/ssh-tunnel-daemon ./cmd/ssh-tunnel-daemon"
 
+
+[tasks.install]
+description = "安装到 ~/.local/bin/ 并创建 sshtnl、s17n 软链接"
+depends = ["build"]
+run = """
+mkdir -p ~/.local/bin/
+cp bin/ssh-tunnel-daemon ~/.local/bin/ssh-tunnel-daemon
+ln -sf ~/.local/bin/ssh-tunnel-daemon ~/.local/bin/sshtnl
+ln -sf ~/.local/bin/ssh-tunnel-daemon ~/.local/bin/s17n
+"""
+
+[tasks.uninstall]
+description = "卸载 ssh-tunnel-daemon（删除二进制和软链接）"
+run = """
+rm -f ~/.local/bin/ssh-tunnel-daemon ~/.local/bin/sshtnl ~/.local/bin/s17n
+"""
 [tasks.test]
 description = "运行全部测试"
 run = "go test ./... -v"

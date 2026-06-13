@@ -17,6 +17,15 @@
 
 ## 安装指南
 
+### 通过 Homebrew 安装
+
+```bash
+brew tap northwang-lucky/tap
+brew install ssh-tunnel-daemon
+```
+
+安装后可直接使用 `ssh-tunnel-daemon`、`sshtnl`、`s17n` 三个命令。
+
 ### 从源码构建（需要 mise 与 Go）
 
 ```bash
