@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.0.0...v1.0.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **config:** 添加 refactor 到 changelog-sections ([412b99d](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/412b99d7f35bef6d407a4e3ffeee8efab3f1e6e2))
+* **config:** 添加 refactor 到 changelog-sections ([15ea94e](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/15ea94e14871a544841b065edb6cd1846f093f26))
+
 ## 1.0.0 (2026-06-13)
 
 
