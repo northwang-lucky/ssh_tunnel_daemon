@@ -179,7 +179,7 @@ func runStopRestart(restart bool) func(*cobra.Command, []string) error {
 			if err != nil {
 				return err
 			}
-			names, err = prompt.MultiSelectRunning(running)
+			names, err = prompt.MultiSelectRunning(running, restart)
 			if err != nil {
 				return err
 			}
@@ -339,4 +339,3 @@ var configEditCmd = &cobra.Command{
 		return command.Run()
 	},
 }
-
