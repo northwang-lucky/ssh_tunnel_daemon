@@ -1,0 +1,14 @@
+[tools]
+go = "1.26.3"
+
+[tasks.build]
+description = "构建二进制文件到 bin/ssh-tunnel-daemon"
+run = "go build -o bin/ssh-tunnel-daemon ./cmd/ssh-tunnel-daemon"
+
+[tasks.test]
+description = "运行全部测试"
+run = "go test ./... -v"
+
+[tasks.clean]
+description = "清理构建产物"
+run = "rm -rf bin/"
