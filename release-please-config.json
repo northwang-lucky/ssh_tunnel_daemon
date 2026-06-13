@@ -12,6 +12,10 @@
       "section": "Bug Fixes"
     },
     {
+      "type": "refactor",
+      "section": "Refactoring"
+    },
+    {
       "type": "chore",
       "section": "Other"
     }
