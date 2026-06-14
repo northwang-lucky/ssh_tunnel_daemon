@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.1.0...v1.2.0) (2026-06-14)
+
+
+### Features
+
+* **cli:** 新增 list 子命令列出所有已保存的隧道 ([6a74aae](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/6a74aaeb966f335eac14b2c10f4447d255be8d2e))
+
+
+### Bug Fixes
+
+* **daemon:** ListRunning 不再把 supervisor PID 文件当作隧道列出来 ([278a9d9](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/278a9d9d4c0e114674ac41bad85d0f699c3cda12))
+* **prompt:** 修复 SelectTunnel 选择已有隧道时错误返回 create=true ([df37f0d](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/df37f0d9290e5a21960a043c8ae5c77259fcf2fd))
+
 ## [1.1.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.0.1...v1.1.0) (2026-06-14)
 
 
