@@ -120,6 +120,20 @@ func StopTunnel(stateDir, name string) error {
 
 
 
+// WaitForTunnelPID polls the pid file for name until a live PID appears or
+// timeout elapses. Returns the tunnel PID on success.
+func WaitForTunnelPID(stateDir, name string, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		pid, err := readPID(stateDir, name)
+		if err == nil && isProcessAlive(pid) {
+			return pid, nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return 0, fmt.Errorf("tunnel %q did not start within %v", name, timeout)
+}
+
 
 // GetStatus returns the runtime status of t based on its pid file.
 func GetStatus(stateDir string, t config.Tunnel) (TunnelStatus, error) {

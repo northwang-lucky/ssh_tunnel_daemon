@@ -207,7 +207,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Started supervisor for tunnel %q (PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
+		fmt.Printf("Started supervisor for tunnel %q (supervisor PID: %d, supervisor log: %s)\n", tunnel.Name, pid, logPath)
+		// The supervisor starts the SSH child asynchronously; wait for its PID file to appear.
+		tunnelPID, err := daemon.WaitForTunnelPID(stateDir, tunnel.Name, 5*time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: tunnel started but failed to read its PID: %v\n", err)
+		} else {
+			fmt.Printf("Tunnel %q is running (PID: %d)\n", tunnel.Name, tunnelPID)
+		}
 	}
 
 	return nil
