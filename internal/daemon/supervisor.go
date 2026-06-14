@@ -35,6 +35,8 @@ func (b backoffPolicy) delay(attempt int) time.Duration {
 
 // ---------------------------------------------------------------------------
 // Supervisor
+// ---------------------------------------------------------------------------
+
 // tunnelStarter is the function signature the supervisor uses to launch
 // an ssh child process.
 type tunnelStarter func(t config.Tunnel) (*exec.Cmd, string, error)
@@ -192,7 +194,6 @@ func StartSupervisor(stateDir string, t config.Tunnel) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
-	defer logFile.Close()
 
 	// Build ports argument.
 	ports := make([]string, len(t.Ports))
@@ -219,8 +220,17 @@ func StartSupervisor(stateDir string, t config.Tunnel) (int, string, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
 		return 0, "", fmt.Errorf("start supervisor: %w", err)
 	}
+
+	// Keep the log file alive until the supervisor process exits. The
+	// internal os/exec goroutine copies child output into logFile; closing
+	// it prematurely breaks the pipe and kills the child with SIGPIPE.
+	go func() {
+		_ = cmd.Wait()
+		_ = logFile.Close()
+	}()
 
 	if err := writeSupervisorPID(stateDir, t.Name, cmd.Process.Pid); err != nil {
 		_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)

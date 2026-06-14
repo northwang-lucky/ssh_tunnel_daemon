@@ -45,8 +45,10 @@ func startTunnelCommand(t config.Tunnel) (*exec.Cmd, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	defer logFile.Close()
 
+	// Note: do NOT close logFile here. The os/exec goroutine copies child
+	// output into it; closing prematurely breaks the pipe and kills the
+	// child with SIGPIPE.
 	cmd := exec.Command("ssh", buildSSHArgs(t)...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

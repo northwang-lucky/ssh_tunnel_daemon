@@ -391,6 +391,7 @@ func runSupervisor(cmd *cobra.Command, args []string) error {
 	// Clean up our own PID file on exit.
 	defer os.Remove(daemon.SupervisorPIDPath(stateDir, tunnel.Name))
 
+	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
