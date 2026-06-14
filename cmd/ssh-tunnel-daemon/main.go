@@ -32,6 +32,9 @@ var rootCmd = &cobra.Command{
 	Short:        "Manage SSH tunnel daemons",
 	Long:         "ssh-tunnel-daemon starts, stops, restarts and monitors SSH tunnels using the system ssh client.",
 	SilenceUsage: true,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := logger.CleanupOldLogs(config.DefaultLogDir(), 3*24*time.Hour); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: log cleanup failed: %v\n", err)
