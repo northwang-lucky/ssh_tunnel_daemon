@@ -148,7 +148,8 @@ func GetStatus(stateDir string, t config.Tunnel) (TunnelStatus, error) {
 }
 
 // ListRunning returns the status of every tunnel that has a pid file under
-// stateDir. Missing config fields are left empty.
+// stateDir. Missing config fields are left empty. Supervisor pid files are
+// ignored.
 func ListRunning(stateDir string, cfg *config.Config) ([]TunnelStatus, error) {
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
@@ -160,11 +161,15 @@ func ListRunning(stateDir string, cfg *config.Config) ([]TunnelStatus, error) {
 
 	var statuses []TunnelStatus
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".pid" {
+		if entry.IsDir() {
 			continue
 		}
-		name := strings.TrimSuffix(entry.Name(), ".pid")
-		t, _ := cfg.FindTunnel(name)
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".pid") || strings.HasSuffix(name, ".supervisor.pid") {
+			continue
+		}
+		tunnelName := strings.TrimSuffix(name, ".pid")
+		t, _ := cfg.FindTunnel(tunnelName)
 		status, err := GetStatus(stateDir, t)
 		if err != nil {
 			continue

@@ -118,6 +118,9 @@ func TestListRunning(t *testing.T) {
 	if err := writePID(dir, "web", 1); err != nil {
 		t.Fatalf("writePID: %v", err)
 	}
+	if err := writeSupervisorPID(dir, "web", 2); err != nil {
+		t.Fatalf("writeSupervisorPID: %v", err)
+	}
 
 	cfg := &config.Config{Tunnels: []config.Tunnel{{Name: "web", Target: "u@h", Ports: []int{80}, Mode: "local"}}}
 	statuses, err := ListRunning(dir, cfg)
