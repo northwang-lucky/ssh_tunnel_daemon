@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -44,9 +46,10 @@ type tunnelStarter func(t config.Tunnel) (*exec.Cmd, string, error)
 // Supervisor watches a single SSH tunnel and re-launches it on exit using
 // exponential backoff.
 type Supervisor struct {
-	stateDir string
-	backoff  backoffPolicy
-	starter  tunnelStarter
+	stateDir  string
+	backoff   backoffPolicy
+	starter   tunnelStarter
+	logWriter *logger.LineWriter
 
 	mu  sync.Mutex
 	cmd *exec.Cmd // guarded by mu; set by each launch attempt
@@ -59,6 +62,12 @@ type SupervisorOption func(*Supervisor)
 func WithTunnelStarter(starter tunnelStarter) SupervisorOption {
 	return func(s *Supervisor) {
 		s.starter = starter
+	}
+}
+
+func WithLogWriter(logWriter *logger.LineWriter) SupervisorOption {
+	return func(s *Supervisor) {
+		s.logWriter = logWriter
 	}
 }
 
@@ -88,7 +97,7 @@ func (s *Supervisor) WatchTunnel(ctx context.Context, t config.Tunnel) error {
 	for {
 		cmd, logPath, err := s.starter(t)
 		if err != nil {
-			logLaunchFailure(t.Name, attempt, err)
+			s.logSupervisor("launch failed for %q (attempt %d): %v", t.Name, attempt, err)
 			if attempt >= s.backoff.maxRetries {
 				return fmt.Errorf("tunnel %q: max retries (%d) exhausted after launch failure: %w", t.Name, s.backoff.maxRetries, err)
 			}
@@ -115,6 +124,10 @@ func (s *Supervisor) WatchTunnel(ctx context.Context, t config.Tunnel) error {
 			s.mu.Unlock()
 			return fmt.Errorf("write ssh pid file: %w", err)
 		}
+		if meta, err := ReadRunMetadata(s.stateDir, t.Name); err == nil {
+			meta.CurrentPID = cmd.Process.Pid
+			_ = writeRunMetadata(s.stateDir, meta)
+		}
 
 		// Watch for ctx cancellation while ssh runs.
 		done := make(chan struct{})
@@ -135,9 +148,9 @@ func (s *Supervisor) WatchTunnel(ctx context.Context, t config.Tunnel) error {
 
 		// Log the exit.
 		if waitErr != nil {
-			fmt.Fprintf(os.Stderr, "[supervisor] ssh process %q exited: %v (attempt %d, log: %s)\n", t.Name, waitErr, attempt, logPath)
+			s.logSupervisor("ssh process %q exited: %v (attempt %d, log: %s)", t.Name, waitErr, attempt, logPath)
 		} else {
-			fmt.Fprintf(os.Stderr, "[supervisor] ssh process %q exited cleanly (attempt %d, log: %s)\n", t.Name, attempt, logPath)
+			s.logSupervisor("ssh process %q exited cleanly (attempt %d, log: %s)", t.Name, attempt, logPath)
 		}
 
 		// Check if ctx was cancelled while we were waiting.
@@ -147,11 +160,12 @@ func (s *Supervisor) WatchTunnel(ctx context.Context, t config.Tunnel) error {
 
 		if attempt >= s.backoff.maxRetries {
 			_ = os.Remove(pidPath(s.stateDir, t.Name))
+			RemoveRunMetadata(s.stateDir, t.Name)
 			return fmt.Errorf("tunnel %q: max retries (%d) exhausted", t.Name, s.backoff.maxRetries)
 		}
 
 		delay := s.backoff.delay(attempt)
-		fmt.Fprintf(os.Stderr, "[supervisor] retrying %q in %v (attempt %d/%d)\n", t.Name, delay, attempt, s.backoff.maxRetries)
+		s.logSupervisor("retrying %q in %v (attempt %d/%d)", t.Name, delay, attempt, s.backoff.maxRetries)
 
 		select {
 		case <-ctx.Done():
@@ -161,6 +175,16 @@ func (s *Supervisor) WatchTunnel(ctx context.Context, t config.Tunnel) error {
 
 		attempt++
 	}
+}
+
+func (s *Supervisor) logSupervisor(format string, args ...interface{}) {
+	line := fmt.Sprintf("[supervisor] "+format, args...)
+	if s.logWriter != nil {
+		if err := s.logWriter.WriteLine(line); err == nil {
+			return
+		}
+	}
+	fmt.Fprintln(os.Stderr, line)
 }
 
 // killCurrent terminates the process group of the currently running ssh
@@ -179,7 +203,7 @@ func (s *Supervisor) killCurrent() {
 // ---------------------------------------------------------------------------
 
 // StartSupervisor starts a supervisor subprocess that watches t. It returns
-// the supervisor PID and path to the supervisor log file.
+// the supervisor PID and path to the first session log segment.
 func StartSupervisor(stateDir string, t config.Tunnel) (int, string, error) {
 	if err := validateTunnel(t); err != nil {
 		return 0, "", err
@@ -190,8 +214,17 @@ func StartSupervisor(stateDir string, t config.Tunnel) (int, string, error) {
 		return 0, "", fmt.Errorf("tunnel %q supervisor already running (PID %d)", t.Name, pid)
 	}
 
-	logFile, logPath, err := logger.NewLogFile(config.DefaultLogDir(), "supervisor")
-	if err != nil {
+	now := time.Now()
+	sessionID := newSessionID(now, os.Getpid())
+	logPath := logger.SessionSegmentPath(config.DefaultLogDir(), t.Name, sessionID, 1)
+	meta := RunMetadata{
+		Name:      t.Name,
+		SessionID: sessionID,
+		StartedAt: now,
+		MaxLines:  logger.DefaultMaxLines,
+		LogPath:   logPath,
+	}
+	if err := writeRunMetadata(stateDir, meta); err != nil {
 		return 0, "", err
 	}
 
@@ -214,32 +247,72 @@ func StartSupervisor(stateDir string, t config.Tunnel) (int, string, error) {
 		"--target", t.Target,
 		"--ports", portsStr,
 		"--mode", t.Mode,
+		"--session-id", sessionID,
 	)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
-		logFile.Close()
+		RemoveRunMetadata(stateDir, t.Name)
 		return 0, "", fmt.Errorf("start supervisor: %w", err)
 	}
 
-	// Keep the log file alive until the supervisor process exits. The
-	// internal os/exec goroutine copies child output into logFile; closing
-	// it prematurely breaks the pipe and kills the child with SIGPIPE.
-	go func() {
-		_ = cmd.Wait()
-		_ = logFile.Close()
-	}()
-
 	if err := writeSupervisorPID(stateDir, t.Name, cmd.Process.Pid); err != nil {
 		_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+		RemoveRunMetadata(stateDir, t.Name)
 		return 0, "", fmt.Errorf("write supervisor pid file: %w", err)
+	}
+	currentMeta, err := ReadRunMetadata(stateDir, t.Name)
+	if err != nil {
+		currentMeta = meta
+	}
+	currentMeta.SupervisorPID = cmd.Process.Pid
+	if err := writeRunMetadata(stateDir, currentMeta); err != nil {
+		_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+		RemoveRunMetadata(stateDir, t.Name)
+		return 0, "", err
 	}
 
 	return cmd.Process.Pid, logPath, nil
 }
 
-func logLaunchFailure(name string, attempt int, err error) {
-	fmt.Fprintf(os.Stderr, "[supervisor] launch failed for %q (attempt %d): %v\n", name, attempt, err)
+func StartTunnelCommandWithWriter(t config.Tunnel, logWriter *logger.LineWriter) (*exec.Cmd, string, error) {
+	if logWriter == nil {
+		return startTunnelCommand(t)
+	}
+	if err := validateTunnel(t); err != nil {
+		return nil, "", err
+	}
+	if _, err := exec.LookPath("ssh"); err != nil {
+		return nil, "", fmt.Errorf("ssh command not found in PATH: %w", err)
+	}
+
+	cmd := exec.Command("ssh", buildSSHArgs(t)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, "", fmt.Errorf("stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, "", fmt.Errorf("start ssh: %w", err)
+	}
+	go streamLines(logWriter, stdout)
+	go streamLines(logWriter, stderr)
+	return cmd, "session log", nil
+}
+
+func streamLines(logWriter *logger.LineWriter, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	for scanner.Scan() {
+		_ = logWriter.WriteLine(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		_ = logWriter.WriteLine(fmt.Sprintf("[supervisor] log stream error: %v", err))
+	}
 }

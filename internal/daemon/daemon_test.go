@@ -135,6 +135,24 @@ func TestListRunning(t *testing.T) {
 	}
 }
 
+func TestWaitForTunnelPID(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Write a live PID and verify it is picked up immediately.
+	if err := writePID(dir, "live", os.Getpid()); err != nil {
+		t.Fatalf("writePID: %v", err)
+	}
+	pid, err := WaitForTunnelPID(dir, "live", time.Second)
+	if err != nil {
+		t.Fatalf("WaitForTunnelPID: %v", err)
+	}
+	if pid != os.Getpid() {
+		t.Errorf("expected pid %d, got %d", os.Getpid(), pid)
+	}
+}
+
 func TestStartTunnelRealSleep(t *testing.T) {
 	if _, err := exec.LookPath("ssh"); err != nil {
 		t.Skip("ssh not found in PATH")

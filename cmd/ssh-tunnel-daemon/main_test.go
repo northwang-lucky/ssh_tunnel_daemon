@@ -39,13 +39,23 @@ func TestHelpCommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; output: %s", code, out)
 	}
-	for _, want := range []string{"sshtnl", "s17n", "start", "stop", "list", "status", "config"} {
+	for _, want := range []string{"sshtnl", "s17n", "start", "stop", "list", "status", "log", "config"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected help output to contain %q, got: %s", want, out)
 		}
 	}
 	if strings.Contains(out, "completion") {
 		t.Errorf("help output should not contain the default cobra completion command, got: %s", out)
+	}
+}
+
+func TestStartNoSupervisorFlagRemoved(t *testing.T) {
+	out, code := execute("start", "--help")
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; output: %s", code, out)
+	}
+	if strings.Contains(out, "no-supervisor") {
+		t.Errorf("start help should not contain --no-supervisor, got: %s", out)
 	}
 }
 
