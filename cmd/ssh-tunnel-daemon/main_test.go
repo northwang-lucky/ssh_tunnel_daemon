@@ -44,6 +44,9 @@ func TestHelpCommand(t *testing.T) {
 			t.Errorf("expected help output to contain %q, got: %s", want, out)
 		}
 	}
+	if strings.Contains(out, "completion") {
+		t.Errorf("help output should not contain the default cobra completion command, got: %s", out)
+	}
 }
 
 func TestAlias(t *testing.T) {

@@ -2,7 +2,7 @@
 
 > 一个用于启动、停止、重启和监控 SSH 隧道的守护进程 CLI 工具。
 >
-> 支持 `local`（`-L`）和 `remote`（`-R`）两种隧道模式，通过 YAML 配置文件管理隧道，并为每个隧道生成独立的日志文件。
+> 支持 `local`（`-L`）和 `remote`（`-R`）两种隧道模式，带有断线自动重连的 watchdog（supervisor）。通过 YAML 配置文件管理隧道，并为每个隧道生成独立的日志文件。
 
 ---
 
@@ -98,13 +98,12 @@ tunnels:
 - 同时支持 `sshtnl` 与 `s17n` 作为快捷命令（例如 `sshtnl status`）。
 - 配置文件默认保存在 `$XDG_CONFIG_HOME/ssh-tunnel-daemon/config.yaml`（回退到 `~/.config/ssh-tunnel-daemon/config.yaml`）。
 - 状态文件（PID）保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/*.pid`（回退到 `~/.local/state/ssh-tunnel-daemon/*.pid`）。
-- 日志文件保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/logs/*.log`。
+- supervisor PID 文件保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/*.supervisor.pid`。
 - 日志默认保留 3 天，每次命令调用时自动懒清除过期日志。
 
 ### `ssh-tunnel-daemon start` — 启动隧道
 
-启动一个 SSH 隧道守护进程。如果未指定隧道名称且终端为交互式，会弹出选择/创建界面。
-
+启动一个 SSH 隧道守护进程并附带 watchdog supervisor，后者会在 `ssh` 意外退出时自动按指数退避重连（最多 10 次）。如果未指定隧道名称且终端为交互式，会弹出选择/创建界面。
 **用法：**
 
 ```bash
@@ -119,8 +118,7 @@ ssh-tunnel-daemon start [tunnel_name] [flags]
 | `--ports` | `-p` | 逗号分隔的端口号列表 |
 | `--mode` | `-m` | 隧道模式：`local` 或 `remote`，默认为 `local` |
 | `--save` | - | 将隧道定义持久化到配置文件 |
-
-**示例：**
+| `--no-supervisor` | - | 禁用 supervisor，直接启动 ssh（回退到旧行为） |
 
 ```bash
 # 交互式选择或创建隧道
@@ -245,8 +243,7 @@ ssh-tunnel-daemon version
 
 - 配置文件：`$XDG_CONFIG_HOME/ssh-tunnel-daemon/config.yaml`
 - 状态文件（pid）：`$XDG_STATE_HOME/ssh-tunnel-daemon/*.pid`
-- 日志文件：`$XDG_STATE_HOME/ssh-tunnel-daemon/logs/*.log`
-
+- supervisor PID 文件：`$XDG_STATE_HOME/ssh-tunnel-daemon/*.supervisor.pid`
 ## 开发
 
 ```bash
