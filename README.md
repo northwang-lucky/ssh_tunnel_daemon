@@ -1,6 +1,6 @@
 # ssh-tunnel-daemon
 
-> 一个用于启动、停止、重启和监控 SSH 隧道的守护进程 CLI 工具。
+> 一个用于启动、停止和监控 SSH 隧道的守护进程 CLI 工具。
 >
 > 支持 `local`（`-L`）和 `remote`（`-R`）两种隧道模式，带有断线自动重连的 watchdog（supervisor）。通过 YAML 配置文件管理隧道，并为每个隧道生成独立的日志文件。
 
@@ -13,7 +13,7 @@
 - 本地调试时把远程数据库端口映射到本地
 - 把本地服务暴露到远程跳板机
 
-手动维护这些 `ssh -L` / `ssh -R` 命令既容易出错，也难以查看哪些隧道正在运行。`ssh-tunnel-daemon` 帮你把隧道配置持久化到 YAML 文件，通过一条命令即可启动、停止、重启和查看状态，并为每个隧道维护独立的 PID 与日志。
+手动维护这些 `ssh -L` / `ssh -R` 命令既容易出错，也难以查看哪些隧道正在运行。`ssh-tunnel-daemon` 帮你把隧道配置持久化到 YAML 文件，通过一条命令即可启动、停止和查看状态，并为每个隧道维护独立的 PID 与日志。
 
 ## 安装指南
 
@@ -61,10 +61,6 @@ mise run build
 
 # 5. 停止隧道
 ./bin/ssh-tunnel-daemon stop web
-
-# 6. 重启隧道
-./bin/ssh-tunnel-daemon restart web
-```
 
 ### 配置文件示例
 
@@ -159,29 +155,6 @@ ssh-tunnel-daemon stop web api
 ssh-tunnel-daemon stop
 ```
 
----
-
-### `ssh-tunnel-daemon restart` — 重启隧道
-
-重启一个或多个 SSH 隧道。隧道定义必须从配置文件中存在。如果未指定名称，会弹出交互式多选界面。
-
-**用法：**
-
-```bash
-ssh-tunnel-daemon restart [tunnel_name...]
-```
-
-**示例：**
-
-```bash
-# 重启单个隧道
-ssh-tunnel-daemon restart web
-
-# 交互式选择
-ssh-tunnel-daemon restart
-```
-
----
 
 ### `ssh-tunnel-daemon status` — 查看隧道状态
 

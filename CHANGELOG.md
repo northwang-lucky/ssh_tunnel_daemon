@@ -24,6 +24,10 @@
   - `stop` 命令会同时停止 supervisor 和 ssh 进程
   - supervisor 使用独立的 PID 文件和日志
 
+### Refactoring
+
+* **cli:** 移除 restart 子命令
+
 ## [1.0.1](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.0.0...v1.0.1) (2026-06-13)
 
 

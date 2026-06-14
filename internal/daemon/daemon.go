@@ -118,11 +118,6 @@ func StopTunnel(stateDir, name string) error {
 	return nil
 }
 
-// RestartTunnel stops and then starts the tunnel t.
-func RestartTunnel(stateDir string, t config.Tunnel) (int, string, error) {
-	_ = StopTunnel(stateDir, t.Name)
-	return StartTunnel(stateDir, t)
-}
 
 
 
