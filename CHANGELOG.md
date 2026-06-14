@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.0.1...v1.1.0) (2026-06-14)
+
+
+### Features
+
+* **daemon:** release supervisor auto-reconnect (minor bump) ([e07f6e9](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/e07f6e940187f5cbde0a2bebb8ca6aba42152459))
+* **daemon:** 新增断线自动重连 supervisor 机制 ([0e1cf62](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/0e1cf62aee8b836b832af9d0162e07730fbae641))
+
+
+### Bug Fixes
+
+* **cli:** 禁用 Cobra 默认生成的 completion 子命令 ([2460a05](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/2460a05abb5b69434bc33405ba8e3fde86df778f))
+* **daemon:** 修复 supervisor 被 SIGPIPE/SIGHUP 意外终止的问题 ([a5b5749](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/a5b57490b3f94822d0f89df4a8a060f60bf34806))
+
 ## [Unreleased]
 
 ### Features
