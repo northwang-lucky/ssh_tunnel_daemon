@@ -48,7 +48,8 @@ mise run build
 # 2. 启动并保存一条 local 隧道
 ./bin/ssh-tunnel-daemon start web -t user@example.com -p 8080,9090 -m local --save
 # 输出：
-# Started tunnel "web" (PID: 12345, log: ~/.local/state/ssh-tunnel-daemon/logs/web_20260101_120000.log)
+# Started supervisor for tunnel "web" (supervisor PID: 12345, log: ~/.local/state/ssh-tunnel-daemon/logs/web/session_20260101_120000_123_000001.log)
+# Tunnel "web" is running (PID: 12346)
 
 # 3. 查看状态
 ./bin/ssh-tunnel-daemon status
@@ -95,6 +96,8 @@ tunnels:
 - 配置文件默认保存在 `$XDG_CONFIG_HOME/ssh-tunnel-daemon/config.yaml`（回退到 `~/.config/ssh-tunnel-daemon/config.yaml`）。
 - 状态文件（PID）保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/*.pid`（回退到 `~/.local/state/ssh-tunnel-daemon/*.pid`）。
 - supervisor PID 文件保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/*.supervisor.pid`。
+- 当前启动会话元数据保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/*.run.json`。
+- 日志按隧道与启动会话分组，保存在 `$XDG_STATE_HOME/ssh-tunnel-daemon/logs/{tunnel}/session_{session}_*.log`，默认每 1000 行轮转。
 - 日志默认保留 3 天，每次命令调用时自动懒清除过期日志。
 
 ### `ssh-tunnel-daemon start` — 启动隧道
@@ -114,7 +117,6 @@ ssh-tunnel-daemon start [tunnel_name] [flags]
 | `--ports` | `-p` | 逗号分隔的端口号列表 |
 | `--mode` | `-m` | 隧道模式：`local` 或 `remote`，默认为 `local` |
 | `--save` | - | 将隧道定义持久化到配置文件 |
-| `--no-supervisor` | - | 禁用 supervisor，直接启动 ssh（回退到旧行为） |
 
 ```bash
 # 交互式选择或创建隧道
@@ -178,6 +180,34 @@ ssh-tunnel-daemon status web
 
 ---
 
+### `ssh-tunnel-daemon log` — 查看当前启动会话日志
+
+正序输出当前正在运行的 tunnel 本次 `start` 会话日志。supervisor 状态行与 `ssh` 输出写入同一组日志文件，supervisor 行带 `[supervisor]` 前缀。如果未指定名称，会弹出交互式选择界面。
+
+**用法：**
+
+```bash
+ssh-tunnel-daemon log [tunnel_name] [flags]
+```
+
+**标志：**
+
+| 标志 | 简写 | 说明 |
+|------|------|------|
+| `--follow` | `-f` | 输出已有日志后持续跟随新日志 |
+
+**示例：**
+
+```bash
+# 查看当前 web 会话日志
+ssh-tunnel-daemon log web
+
+# 跟随输出
+ssh-tunnel-daemon log -f web
+```
+
+---
+
 ### `ssh-tunnel-daemon config show` — 显示配置
 
 显示当前配置文件内容。如果配置文件不存在，会提示尚未创建。
@@ -217,6 +247,9 @@ ssh-tunnel-daemon version
 - 配置文件：`$XDG_CONFIG_HOME/ssh-tunnel-daemon/config.yaml`
 - 状态文件（pid）：`$XDG_STATE_HOME/ssh-tunnel-daemon/*.pid`
 - supervisor PID 文件：`$XDG_STATE_HOME/ssh-tunnel-daemon/*.supervisor.pid`
+- 当前启动会话元数据：`$XDG_STATE_HOME/ssh-tunnel-daemon/*.run.json`
+- 日志文件：`$XDG_STATE_HOME/ssh-tunnel-daemon/logs/{tunnel}/session_{session}_*.log`
+
 ## 开发
 
 ```bash

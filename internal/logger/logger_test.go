@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,5 +98,82 @@ func TestSanitizeName(t *testing.T) {
 
 	if got := sanitizeName("a/b"); got != "a-b" {
 		t.Errorf("sanitizeName(a/b) = %q, want a-b", got)
+	}
+}
+
+func TestLineWriterRotatesByLineCount(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	w, first, err := NewLineWriter(dir, "web/api", "session-1", 2)
+	if err != nil {
+		t.Fatalf("NewLineWriter: %v", err)
+	}
+	for _, line := range []string{"one", "two", "three"} {
+		if err := w.WriteLine(line); err != nil {
+			t.Fatalf("WriteLine: %v", err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if first != SessionSegmentPath(dir, "web/api", "session-1", 1) {
+		t.Errorf("first path = %q", first)
+	}
+	firstData, err := os.ReadFile(SessionSegmentPath(dir, "web/api", "session-1", 1))
+	if err != nil {
+		t.Fatalf("read first segment: %v", err)
+	}
+	if string(firstData) != "one\ntwo\n" {
+		t.Errorf("first segment = %q", string(firstData))
+	}
+	secondData, err := os.ReadFile(SessionSegmentPath(dir, "web/api", "session-1", 2))
+	if err != nil {
+		t.Fatalf("read second segment: %v", err)
+	}
+	if string(secondData) != "three\n" {
+		t.Errorf("second segment = %q", string(secondData))
+	}
+}
+
+func TestStreamSessionOrdersSegments(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	w, _, err := NewLineWriter(dir, "web", "s1", 1)
+	if err != nil {
+		t.Fatalf("NewLineWriter: %v", err)
+	}
+	for _, line := range []string{"a", "b", "c"} {
+		if err := w.WriteLine(line); err != nil {
+			t.Fatalf("WriteLine: %v", err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := StreamSession(&out, dir, "web", "s1"); err != nil {
+		t.Fatalf("StreamSession: %v", err)
+	}
+	if out.String() != "a\nb\nc\n" {
+		t.Errorf("stream = %q", out.String())
+	}
+}
+
+func TestSafeName(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"web/api":       "web-api",
+		" user@host:22": "user-host-22",
+		"***":           "tunnel",
+	}
+	for in, want := range cases {
+		if got := SafeName(in); got != want {
+			t.Errorf("SafeName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

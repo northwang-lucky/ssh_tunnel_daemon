@@ -44,14 +44,13 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, listCmd, statusCmd, configCmd, supervisorCmd)
+	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, listCmd, statusCmd, logCmd, configCmd, supervisorCmd)
 	configCmd.AddCommand(configShowCmd, configEditCmd)
 
 	startCmd.Flags().StringP("target", "t", "", "SSH target (e.g. user@host)")
 	startCmd.Flags().StringP("ports", "p", "", "Comma-separated ports")
 	startCmd.Flags().StringP("mode", "m", "local", "Tunnel mode: local or remote")
 	startCmd.Flags().Bool("save", false, "Persist the tunnel definition to the config file")
-	startCmd.Flags().Bool("no-supervisor", false, "Start the SSH tunnel directly without a watchdog supervisor")
 }
 
 var versionCmd = &cobra.Command{
@@ -105,7 +104,6 @@ var listCmd = &cobra.Command{
 		return nil
 	},
 }
-
 
 var startCmd = &cobra.Command{
 	Use:   "start [tunnel_name]",
@@ -194,27 +192,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	noSupervisor, _ := cmd.Flags().GetBool("no-supervisor")
-
-	if noSupervisor {
-		pid, logPath, err := daemon.StartTunnel(stateDir, tunnel)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Started tunnel %q (PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
+	pid, logPath, err := daemon.StartSupervisor(stateDir, tunnel)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Started supervisor for tunnel %q (supervisor PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
+	// The supervisor starts the SSH child asynchronously; wait for its PID file to appear.
+	tunnelPID, err := daemon.WaitForTunnelPID(stateDir, tunnel.Name, 5*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: tunnel started but failed to read its PID: %v\n", err)
 	} else {
-		pid, logPath, err := daemon.StartSupervisor(stateDir, tunnel)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Started supervisor for tunnel %q (supervisor PID: %d, supervisor log: %s)\n", tunnel.Name, pid, logPath)
-		// The supervisor starts the SSH child asynchronously; wait for its PID file to appear.
-		tunnelPID, err := daemon.WaitForTunnelPID(stateDir, tunnel.Name, 5*time.Second)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: tunnel started but failed to read its PID: %v\n", err)
-		} else {
-			fmt.Printf("Tunnel %q is running (PID: %d)\n", tunnel.Name, tunnelPID)
-		}
+		fmt.Printf("Tunnel %q is running (PID: %d)\n", tunnel.Name, tunnelPID)
 	}
 
 	return nil
@@ -345,6 +333,62 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+var logCmd = &cobra.Command{
+	Use:   "log [tunnel_name]",
+	Short: "Show the current tunnel session log",
+	RunE:  runLog,
+}
+
+func init() {
+	logCmd.Flags().BoolP("follow", "f", false, "Follow log output")
+}
+
+func runLog(cmd *cobra.Command, args []string) error {
+	if len(args) > 1 {
+		return errors.New("too many arguments; provide at most one tunnel name")
+	}
+
+	stateDir := config.DefaultStateDir()
+	cfg, err := config.LoadConfig(config.DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+
+	var name string
+	if len(args) == 1 {
+		name = args[0]
+	} else {
+		selected, create, err := prompt.SelectTunnel(cfg.Tunnels)
+		if err != nil {
+			return err
+		}
+		if create {
+			return errors.New("log requires an existing tunnel")
+		}
+		name = selected.Name
+	}
+
+	meta, err := daemon.ReadRunMetadata(stateDir, name)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("tunnel %q has no current session log; start it again to enable session logs", name)
+	}
+	if err != nil {
+		return err
+	}
+
+	follow, _ := cmd.Flags().GetBool("follow")
+	if follow {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		err := logger.FollowSession(ctx, cmd.OutOrStdout(), config.DefaultLogDir(), meta.Name, meta.SessionID, 500*time.Millisecond)
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return nil
+		}
+		return err
+	}
+	return logger.StreamSession(cmd.OutOrStdout(), config.DefaultLogDir(), meta.Name, meta.SessionID)
+}
+
 func printStatus(s daemon.TunnelStatus) {
 	statusStr := "stopped"
 	if s.Running {
@@ -423,9 +467,13 @@ func runSupervisor(cmd *cobra.Command, args []string) error {
 	target, _ := cmd.Flags().GetString("target")
 	portsFlag, _ := cmd.Flags().GetString("ports")
 	mode, _ := cmd.Flags().GetString("mode")
+	sessionID, _ := cmd.Flags().GetString("session-id")
 
 	if name == "" || target == "" || portsFlag == "" || mode == "" {
 		return errors.New("--name, --target, --ports, and --mode are all required")
+	}
+	if sessionID == "" {
+		return errors.New("--session-id is required")
 	}
 
 	ports, err := config.ParsePorts(portsFlag)
@@ -440,6 +488,14 @@ func runSupervisor(cmd *cobra.Command, args []string) error {
 
 	tunnel := config.Tunnel{Name: name, Target: target, Ports: ports, Mode: mode}
 	stateDir := config.DefaultStateDir()
+	logWriter, _, err := logger.NewLineWriter(config.DefaultLogDir(), tunnel.Name, sessionID, logger.DefaultMaxLines)
+	if err != nil {
+		return err
+	}
+	defer logWriter.Close()
+	if err := logWriter.WriteLine(fmt.Sprintf("[supervisor] started supervisor for %q (PID %d)", tunnel.Name, os.Getpid())); err != nil {
+		return err
+	}
 
 	// Clean up our own PID file on exit.
 	defer os.Remove(daemon.SupervisorPIDPath(stateDir, tunnel.Name))
@@ -448,7 +504,12 @@ func runSupervisor(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	return daemon.NewSupervisor(stateDir).WatchTunnel(ctx, tunnel)
+	return daemon.NewSupervisor(stateDir,
+		daemon.WithLogWriter(logWriter),
+		daemon.WithTunnelStarter(func(t config.Tunnel) (*exec.Cmd, string, error) {
+			return daemon.StartTunnelCommandWithWriter(t, logWriter)
+		}),
+	).WatchTunnel(ctx, tunnel)
 }
 
 func init() {
@@ -456,8 +517,10 @@ func init() {
 	supervisorCmd.Flags().String("target", "", "SSH target")
 	supervisorCmd.Flags().String("ports", "", "Comma-separated ports")
 	supervisorCmd.Flags().String("mode", "", "Tunnel mode: local or remote")
+	supervisorCmd.Flags().String("session-id", "", "Log session ID")
 	_ = supervisorCmd.MarkFlagRequired("name")
 	_ = supervisorCmd.MarkFlagRequired("target")
 	_ = supervisorCmd.MarkFlagRequired("ports")
 	_ = supervisorCmd.MarkFlagRequired("mode")
+	_ = supervisorCmd.MarkFlagRequired("session-id")
 }

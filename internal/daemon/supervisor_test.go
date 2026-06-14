@@ -32,8 +32,8 @@ func TestBackoffDelay(t *testing.T) {
 		{3, 8 * time.Second},
 		{4, 16 * time.Second},
 		{5, 32 * time.Second},
-		{6, 60 * time.Second}, // capped
-		{7, 60 * time.Second}, // capped
+		{6, 60 * time.Second},  // capped
+		{7, 60 * time.Second},  // capped
 		{10, 60 * time.Second}, // capped
 	}
 
@@ -73,6 +73,31 @@ func TestWriteReadSupervisorPID(t *testing.T) {
 	}
 	if pid != 12345 {
 		t.Errorf("pid = %d, want 12345", pid)
+	}
+}
+
+func TestStopSupervisorRemovesRunMetadata(t *testing.T) {
+	dir := t.TempDir()
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	if err := writeSupervisorPID(dir, "web", cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("writeSupervisorPID: %v", err)
+	}
+	if err := writeRunMetadata(dir, RunMetadata{Name: "web", SessionID: "s1"}); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("writeRunMetadata: %v", err)
+	}
+
+	if err := StopSupervisor(dir, "web"); err != nil {
+		t.Fatalf("StopSupervisor: %v", err)
+	}
+	_ = cmd.Wait()
+	if _, err := os.Stat(RunMetadataPath(dir, "web")); !os.IsNotExist(err) {
+		t.Fatalf("run metadata should be removed")
 	}
 }
 

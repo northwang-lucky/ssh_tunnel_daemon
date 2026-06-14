@@ -55,6 +55,7 @@ func startTunnelCommand(t config.Tunnel) (*exec.Cmd, string, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
 		return nil, "", fmt.Errorf("start ssh: %w", err)
 	}
 
@@ -115,10 +116,9 @@ func StopTunnel(stateDir, name string) error {
 	}
 
 	_ = os.Remove(pidPath(stateDir, name))
+	RemoveRunMetadata(stateDir, name)
 	return nil
 }
-
-
 
 // WaitForTunnelPID polls the pid file for name until a live PID appears or
 // timeout elapses. Returns the tunnel PID on success.
@@ -133,7 +133,6 @@ func WaitForTunnelPID(stateDir, name string, timeout time.Duration) (int, error)
 	}
 	return 0, fmt.Errorf("tunnel %q did not start within %v", name, timeout)
 }
-
 
 // GetStatus returns the runtime status of t based on its pid file.
 func GetStatus(stateDir string, t config.Tunnel) (TunnelStatus, error) {
@@ -317,5 +316,6 @@ func StopSupervisor(stateDir, name string) error {
 	}
 
 	_ = os.Remove(SupervisorPIDPath(stateDir, name))
+	RemoveRunMetadata(stateDir, name)
 	return nil
 }
