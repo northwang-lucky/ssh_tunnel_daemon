@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+* **supervisor:** 新增断线自动重连 supervisor，start 命令默认启用 watchdog 看守 ssh 子进程
+  - ssh 退出时按指数退避自动重试，最多 10 次（2s 基数，60s 封顶）
+  - 新增 `--no-supervisor` 标志可回退到旧行为
+  - `stop` 命令会同时停止 supervisor 和 ssh 进程
+  - supervisor 使用独立的 PID 文件和日志
+
 ## [1.0.1](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.0.0...v1.0.1) (2026-06-13)
 
 

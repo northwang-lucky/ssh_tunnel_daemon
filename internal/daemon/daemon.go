@@ -28,6 +28,39 @@ type TunnelStatus struct {
 
 // StartTunnel launches a new SSH tunnel for t. It returns the child PID and
 // the path to the log file used for stdout/stderr.
+// startTunnelCommand validates, locates ssh, creates the log file, builds
+// SSH arguments, and starts the child process. The caller owns the returned
+// *exec.Cmd and must close the returned logPath when finished. PID file
+// writing is NOT performed by this function.
+func startTunnelCommand(t config.Tunnel) (*exec.Cmd, string, error) {
+	if err := validateTunnel(t); err != nil {
+		return nil, "", err
+	}
+
+	if _, err := exec.LookPath("ssh"); err != nil {
+		return nil, "", fmt.Errorf("ssh command not found in PATH: %w", err)
+	}
+
+	logFile, logPath, err := logger.NewLogFile(config.DefaultLogDir(), t.Name)
+	if err != nil {
+		return nil, "", err
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command("ssh", buildSSHArgs(t)...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		return nil, "", fmt.Errorf("start ssh: %w", err)
+	}
+
+	return cmd, logPath, nil
+}
+
+// StartTunnel launches a new SSH tunnel for t. It returns the child PID and
+// the path to the log file used for stdout/stderr.
 func StartTunnel(stateDir string, t config.Tunnel) (int, string, error) {
 	if err := validateTunnel(t); err != nil {
 		return 0, "", err
@@ -41,23 +74,9 @@ func StartTunnel(stateDir string, t config.Tunnel) (int, string, error) {
 		return 0, "", fmt.Errorf("tunnel %q is already running (PID %d)", t.Name, status.PID)
 	}
 
-	if _, err := exec.LookPath("ssh"); err != nil {
-		return 0, "", fmt.Errorf("ssh command not found in PATH: %w", err)
-	}
-
-	logFile, logPath, err := logger.NewLogFile(config.DefaultLogDir(), t.Name)
+	cmd, logPath, err := startTunnelCommand(t)
 	if err != nil {
 		return 0, "", err
-	}
-	defer logFile.Close()
-
-	cmd := exec.Command("ssh", buildSSHArgs(t)...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := cmd.Start(); err != nil {
-		return 0, "", fmt.Errorf("start ssh: %w", err)
 	}
 
 	if err := writePID(stateDir, t.Name, cmd.Process.Pid); err != nil {
@@ -223,4 +242,64 @@ func isProcessAlive(pid int) bool {
 	}
 	err = process.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// ---------------------------------------------------------------------------
+// Supervisor PID helpers
+// ---------------------------------------------------------------------------
+
+// SupervisorPIDPath returns the filesystem path for a supervisor PID file.
+func SupervisorPIDPath(stateDir, name string) string {
+	return filepath.Join(stateDir, fmt.Sprintf("%s.supervisor.pid", name))
+}
+
+func writeSupervisorPID(stateDir, name string, pid int) error {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	path := SupervisorPIDPath(stateDir, name)
+	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
+}
+
+func readSupervisorPID(stateDir, name string) (int, error) {
+	data, err := os.ReadFile(SupervisorPIDPath(stateDir, name))
+	if err != nil {
+		return 0, err
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("invalid supervisor pid file: %w", err)
+	}
+	return v, nil
+}
+
+// StopSupervisor terminates the supervisor process for name. It mirrors
+// StopTunnel behaviour: SIGTERM first, 5 s wait, then SIGKILL. The supervisor
+// PID file is always removed. If the supervisor is not running the caller
+// receives an error.
+func StopSupervisor(stateDir, name string) error {
+	pid, err := readSupervisorPID(stateDir, name)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("supervisor for tunnel %q is not running", name)
+	}
+	if err != nil {
+		return err
+	}
+
+	if isProcessAlive(pid) {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if !isProcessAlive(pid) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if isProcessAlive(pid) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+
+	_ = os.Remove(SupervisorPIDPath(stateDir, name))
+	return nil
 }

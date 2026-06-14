@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -38,13 +41,14 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, restartCmd, statusCmd, configCmd)
+	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, restartCmd, statusCmd, configCmd, supervisorCmd)
 	configCmd.AddCommand(configShowCmd, configEditCmd)
 
 	startCmd.Flags().StringP("target", "t", "", "SSH target (e.g. user@host)")
 	startCmd.Flags().StringP("ports", "p", "", "Comma-separated ports")
 	startCmd.Flags().StringP("mode", "m", "local", "Tunnel mode: local or remote")
 	startCmd.Flags().Bool("save", false, "Persist the tunnel definition to the config file")
+	startCmd.Flags().Bool("no-supervisor", false, "Start the SSH tunnel directly without a watchdog supervisor")
 }
 
 var versionCmd = &cobra.Command{
@@ -142,13 +146,22 @@ func runStart(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	noSupervisor, _ := cmd.Flags().GetBool("no-supervisor")
 
-	pid, logPath, err := daemon.StartTunnel(stateDir, tunnel)
-	if err != nil {
-		return err
+	if noSupervisor {
+		pid, logPath, err := daemon.StartTunnel(stateDir, tunnel)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Started tunnel %q (PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
+	} else {
+		pid, logPath, err := daemon.StartSupervisor(stateDir, tunnel)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Started supervisor for tunnel %q (PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
 	}
 
-	fmt.Printf("Started tunnel %q (PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
 	return nil
 }
 
@@ -204,6 +217,8 @@ func runStopRestart(restart bool) func(*cobra.Command, []string) error {
 				}
 				fmt.Printf("Restarted tunnel %q (PID: %d, log: %s)\n", name, pid, logPath)
 			} else {
+				// Stop supervisor first (ignore "not running" errors), then the tunnel.
+				_ = daemon.StopSupervisor(stateDir, name)
 				if err := daemon.StopTunnel(stateDir, name); err != nil {
 					fmt.Fprintf(os.Stderr, "error: %v\n", err)
 					hadError = true
@@ -338,4 +353,57 @@ var configEditCmd = &cobra.Command{
 		command.Stderr = os.Stderr
 		return command.Run()
 	},
+}
+
+// supervisorCmd is an internal (hidden) sub-command that acts as the
+// long-running watchdog for a single SSH tunnel. It is spawned automatically
+// by the start command.
+var supervisorCmd = &cobra.Command{
+	Use:    "supervisor",
+	Short:  "Watch a tunnel and restart on failures (internal)",
+	Hidden: true,
+	RunE:   runSupervisor,
+}
+
+func runSupervisor(cmd *cobra.Command, args []string) error {
+	name, _ := cmd.Flags().GetString("name")
+	target, _ := cmd.Flags().GetString("target")
+	portsFlag, _ := cmd.Flags().GetString("ports")
+	mode, _ := cmd.Flags().GetString("mode")
+
+	if name == "" || target == "" || portsFlag == "" || mode == "" {
+		return errors.New("--name, --target, --ports, and --mode are all required")
+	}
+
+	ports, err := config.ParsePorts(portsFlag)
+	if err != nil {
+		return err
+	}
+
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "local" && mode != "remote" {
+		return errors.New("--mode must be local or remote")
+	}
+
+	tunnel := config.Tunnel{Name: name, Target: target, Ports: ports, Mode: mode}
+	stateDir := config.DefaultStateDir()
+
+	// Clean up our own PID file on exit.
+	defer os.Remove(daemon.SupervisorPIDPath(stateDir, tunnel.Name))
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	return daemon.NewSupervisor(stateDir).WatchTunnel(ctx, tunnel)
+}
+
+func init() {
+	supervisorCmd.Flags().String("name", "", "Tunnel name")
+	supervisorCmd.Flags().String("target", "", "SSH target")
+	supervisorCmd.Flags().String("ports", "", "Comma-separated ports")
+	supervisorCmd.Flags().String("mode", "", "Tunnel mode: local or remote")
+	_ = supervisorCmd.MarkFlagRequired("name")
+	_ = supervisorCmd.MarkFlagRequired("target")
+	_ = supervisorCmd.MarkFlagRequired("ports")
+	_ = supervisorCmd.MarkFlagRequired("mode")
 }
