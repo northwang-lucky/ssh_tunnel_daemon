@@ -39,7 +39,7 @@ func TestHelpCommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d; output: %s", code, out)
 	}
-	for _, want := range []string{"sshtnl", "s17n", "start", "stop", "status", "config"} {
+	for _, want := range []string{"sshtnl", "s17n", "start", "stop", "list", "status", "config"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected help output to contain %q, got: %s", want, out)
 		}

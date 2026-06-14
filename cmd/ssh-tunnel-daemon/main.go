@@ -44,7 +44,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, statusCmd, configCmd, supervisorCmd)
+	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, listCmd, statusCmd, configCmd, supervisorCmd)
 	configCmd.AddCommand(configShowCmd, configEditCmd)
 
 	startCmd.Flags().StringP("target", "t", "", "SSH target (e.g. user@host)")
@@ -61,6 +61,51 @@ var versionCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "ssh-tunnel-daemon version %s\n", version.Version)
 	},
 }
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all saved tunnels",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return errors.New("list takes no arguments")
+		}
+
+		cfgPath := config.DefaultConfigPath()
+		cfg, err := config.LoadConfig(cfgPath)
+		if err != nil {
+			return err
+		}
+
+		if len(cfg.Tunnels) == 0 {
+			fmt.Println("No tunnels configured.")
+			return nil
+		}
+
+		rows := [][]string{{"NAME", "TARGET", "MODE", "PORTS"}}
+		for _, t := range cfg.Tunnels {
+			rows = append(rows, []string{t.Name, t.Target, t.Mode, config.FormatPorts(t.Ports)})
+		}
+		widths := make([]int, len(rows[0]))
+		for _, row := range rows {
+			for i, cell := range row {
+				if len(cell) > widths[i] {
+					widths[i] = len(cell)
+				}
+			}
+		}
+		for _, row := range rows {
+			for i, cell := range row {
+				if i == len(row)-1 {
+					fmt.Printf("%s", cell)
+				} else {
+					fmt.Printf("%-*s  ", widths[i], cell)
+				}
+			}
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
 
 var startCmd = &cobra.Command{
 	Use:   "start [tunnel_name]",
