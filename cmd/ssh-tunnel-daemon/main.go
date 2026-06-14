@@ -257,7 +257,10 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("%-12s %-10s %-8s %-12s %s\n", "NAME", "STATUS", "PID", "MODE", "PORTS")
+		// Compute dynamic column widths for strict alignment.
+		rows := [][]string{
+			{"NAME", "STATUS", "PID", "MODE", "PORTS"},
+		}
 		for _, s := range statuses {
 			statusStr := "stopped"
 			pidStr := "-"
@@ -265,7 +268,26 @@ var statusCmd = &cobra.Command{
 				statusStr = "running"
 				pidStr = fmt.Sprintf("%d", s.PID)
 			}
-			fmt.Printf("%-12s %-10s %-8s %-12s %s\n", s.Name, statusStr, pidStr, s.Mode, config.FormatPorts(s.Ports))
+			rows = append(rows, []string{s.Name, statusStr, pidStr, s.Mode, config.FormatPorts(s.Ports)})
+		}
+		widths := make([]int, len(rows[0]))
+		for _, row := range rows {
+			for i, cell := range row {
+				if len(cell) > widths[i] {
+					widths[i] = len(cell)
+				}
+			}
+		}
+
+		for _, row := range rows {
+			for i, cell := range row {
+				if i == len(row)-1 {
+					fmt.Printf("%s", cell)
+				} else {
+					fmt.Printf("%-*s  ", widths[i], cell)
+				}
+			}
+			fmt.Println()
 		}
 		return nil
 	},
