@@ -40,7 +40,7 @@ func SelectTunnel(tunnels []config.Tunnel) (*config.Tunnel, bool, error) {
 
 	for i := range tunnels {
 		if tunnels[i].Name == selected {
-			return &tunnels[i], true, nil
+			return &tunnels[i], false, nil
 		}
 	}
 
