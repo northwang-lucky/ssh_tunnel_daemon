@@ -118,6 +118,9 @@ func TestListRunning(t *testing.T) {
 	if err := writePID(dir, "web", 1); err != nil {
 		t.Fatalf("writePID: %v", err)
 	}
+	if err := writeSupervisorPID(dir, "web", 2); err != nil {
+		t.Fatalf("writeSupervisorPID: %v", err)
+	}
 
 	cfg := &config.Config{Tunnels: []config.Tunnel{{Name: "web", Target: "u@h", Ports: []int{80}, Mode: "local"}}}
 	statuses, err := ListRunning(dir, cfg)
@@ -183,33 +186,6 @@ func TestStartTunnelRealSleep(t *testing.T) {
 	_ = os.RemoveAll(logDir)
 }
 
-func TestRestartTunnel(t *testing.T) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		t.Skip("ssh not found in PATH")
-	}
-
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
-
-	tunnel := config.Tunnel{Name: "restarty", Target: "localhost", Ports: []int{29091}, Mode: "local"}
-	pid1, _, err := StartTunnel(dir, tunnel)
-	if err != nil {
-		t.Fatalf("StartTunnel: %v", err)
-	}
-
-	pid2, logPath2, err := RestartTunnel(dir, tunnel)
-	if err != nil {
-		t.Fatalf("RestartTunnel: %v", err)
-	}
-	if pid2 == pid1 {
-		t.Error("expected new pid after restart")
-	}
-	if _, err := os.Stat(logPath2); err != nil {
-		t.Errorf("new log file should exist: %v", err)
-	}
-
-	_ = StopTunnel(dir, "restarty")
-}
 
 func contains(s, substr string) bool {
 	return len(substr) > 0 && len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (findSubstr(s, substr)))

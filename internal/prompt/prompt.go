@@ -40,7 +40,7 @@ func SelectTunnel(tunnels []config.Tunnel) (*config.Tunnel, bool, error) {
 
 	for i := range tunnels {
 		if tunnels[i].Name == selected {
-			return &tunnels[i], true, nil
+			return &tunnels[i], false, nil
 		}
 	}
 
@@ -91,7 +91,7 @@ func CreateTunnel() (*config.Tunnel, bool, error) {
 }
 
 // MultiSelectRunning lets the user pick one or more running tunnels.
-func MultiSelectRunning(running []daemon.TunnelStatus, restart bool) ([]string, error) {
+func MultiSelectRunning(running []daemon.TunnelStatus) ([]string, error) {
 	if !isTTY() {
 		return nil, errors.New("interactive selection requires a terminal; provide tunnel names as arguments")
 	}
@@ -107,9 +107,6 @@ func MultiSelectRunning(running []daemon.TunnelStatus, restart bool) ([]string, 
 	}
 
 	title := "Select tunnels to stop"
-	if restart {
-		title = "Select tunnels to restart"
-	}
 
 	var selected []string
 	if err := huh.NewMultiSelect[string]().

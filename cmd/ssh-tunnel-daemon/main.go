@@ -30,7 +30,7 @@ var rootCmd = &cobra.Command{
 	Use:          "ssh-tunnel-daemon",
 	Aliases:      []string{"sshtnl", "s17n"},
 	Short:        "Manage SSH tunnel daemons",
-	Long:         "ssh-tunnel-daemon starts, stops, restarts and monitors SSH tunnels using the system ssh client.",
+	Long:         "ssh-tunnel-daemon starts, stops and monitors SSH tunnels using the system ssh client.",
 	SilenceUsage: true,
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
@@ -44,7 +44,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, restartCmd, statusCmd, configCmd, supervisorCmd)
+	rootCmd.AddCommand(versionCmd, startCmd, stopCmd, listCmd, statusCmd, configCmd, supervisorCmd)
 	configCmd.AddCommand(configShowCmd, configEditCmd)
 
 	startCmd.Flags().StringP("target", "t", "", "SSH target (e.g. user@host)")
@@ -61,6 +61,51 @@ var versionCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "ssh-tunnel-daemon version %s\n", version.Version)
 	},
 }
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all saved tunnels",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return errors.New("list takes no arguments")
+		}
+
+		cfgPath := config.DefaultConfigPath()
+		cfg, err := config.LoadConfig(cfgPath)
+		if err != nil {
+			return err
+		}
+
+		if len(cfg.Tunnels) == 0 {
+			fmt.Println("No tunnels configured.")
+			return nil
+		}
+
+		rows := [][]string{{"NAME", "TARGET", "MODE", "PORTS"}}
+		for _, t := range cfg.Tunnels {
+			rows = append(rows, []string{t.Name, t.Target, t.Mode, config.FormatPorts(t.Ports)})
+		}
+		widths := make([]int, len(rows[0]))
+		for _, row := range rows {
+			for i, cell := range row {
+				if len(cell) > widths[i] {
+					widths[i] = len(cell)
+				}
+			}
+		}
+		for _, row := range rows {
+			for i, cell := range row {
+				if i == len(row)-1 {
+					fmt.Printf("%s", cell)
+				} else {
+					fmt.Printf("%-*s  ", widths[i], cell)
+				}
+			}
+			fmt.Println()
+		}
+		return nil
+	},
+}
+
 
 var startCmd = &cobra.Command{
 	Use:   "start [tunnel_name]",
@@ -171,71 +216,47 @@ func runStart(cmd *cobra.Command, args []string) error {
 var stopCmd = &cobra.Command{
 	Use:   "stop [tunnel_name...]",
 	Short: "Stop SSH tunnel daemons",
-	RunE:  runStopRestart(false),
+	RunE:  runStop,
 }
 
-var restartCmd = &cobra.Command{
-	Use:   "restart [tunnel_name...]",
-	Short: "Restart SSH tunnel daemons",
-	RunE:  runStopRestart(true),
-}
+func runStop(cmd *cobra.Command, args []string) error {
+	stateDir := config.DefaultStateDir()
+	cfgPath := config.DefaultConfigPath()
+	cfg, err := config.LoadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
 
-func runStopRestart(restart bool) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		stateDir := config.DefaultStateDir()
-		cfgPath := config.DefaultConfigPath()
-		cfg, err := config.LoadConfig(cfgPath)
+	var names []string
+	if len(args) == 0 {
+		running, err := daemon.ListRunning(stateDir, cfg)
 		if err != nil {
 			return err
 		}
-
-		var names []string
-		if len(args) == 0 {
-			running, err := daemon.ListRunning(stateDir, cfg)
-			if err != nil {
-				return err
-			}
-			names, err = prompt.MultiSelectRunning(running, restart)
-			if err != nil {
-				return err
-			}
-		} else {
-			names = args
+		names, err = prompt.MultiSelectRunning(running)
+		if err != nil {
+			return err
 		}
-
-		var hadError bool
-		for _, name := range names {
-			if restart {
-				t, ok := cfg.FindTunnel(name)
-				if !ok {
-					fmt.Fprintf(os.Stderr, "error: tunnel %q not found in config; cannot restart\n", name)
-					hadError = true
-					continue
-				}
-				pid, logPath, err := daemon.RestartTunnel(stateDir, t)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "error: failed to restart %q: %v\n", name, err)
-					hadError = true
-					continue
-				}
-				fmt.Printf("Restarted tunnel %q (PID: %d, log: %s)\n", name, pid, logPath)
-			} else {
-				// Stop supervisor first (ignore "not running" errors), then the tunnel.
-				_ = daemon.StopSupervisor(stateDir, name)
-				if err := daemon.StopTunnel(stateDir, name); err != nil {
-					fmt.Fprintf(os.Stderr, "error: %v\n", err)
-					hadError = true
-					continue
-				}
-				fmt.Printf("Stopped tunnel %q\n", name)
-			}
-		}
-
-		if hadError {
-			return errors.New("one or more operations failed")
-		}
-		return nil
+	} else {
+		names = args
 	}
+
+	var hadError bool
+	for _, name := range names {
+		// Stop supervisor first (ignore "not running" errors), then the tunnel.
+		_ = daemon.StopSupervisor(stateDir, name)
+		if err := daemon.StopTunnel(stateDir, name); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			hadError = true
+			continue
+		}
+		fmt.Printf("Stopped tunnel %q\n", name)
+	}
+
+	if hadError {
+		return errors.New("one or more operations failed")
+	}
+	return nil
 }
 
 var statusCmd = &cobra.Command{
@@ -281,7 +302,10 @@ var statusCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("%-12s %-10s %-8s %-12s %s\n", "NAME", "STATUS", "PID", "MODE", "PORTS")
+		// Compute dynamic column widths for strict alignment.
+		rows := [][]string{
+			{"NAME", "STATUS", "PID", "MODE", "PORTS"},
+		}
 		for _, s := range statuses {
 			statusStr := "stopped"
 			pidStr := "-"
@@ -289,7 +313,26 @@ var statusCmd = &cobra.Command{
 				statusStr = "running"
 				pidStr = fmt.Sprintf("%d", s.PID)
 			}
-			fmt.Printf("%-12s %-10s %-8s %-12s %s\n", s.Name, statusStr, pidStr, s.Mode, config.FormatPorts(s.Ports))
+			rows = append(rows, []string{s.Name, statusStr, pidStr, s.Mode, config.FormatPorts(s.Ports)})
+		}
+		widths := make([]int, len(rows[0]))
+		for _, row := range rows {
+			for i, cell := range row {
+				if len(cell) > widths[i] {
+					widths[i] = len(cell)
+				}
+			}
+		}
+
+		for _, row := range rows {
+			for i, cell := range row {
+				if i == len(row)-1 {
+					fmt.Printf("%s", cell)
+				} else {
+					fmt.Printf("%-*s  ", widths[i], cell)
+				}
+			}
+			fmt.Println()
 		}
 		return nil
 	},
