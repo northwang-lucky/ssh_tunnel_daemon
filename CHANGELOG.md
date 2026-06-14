@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.2.0...v2.0.0) (2026-06-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove --no-supervisor and route all starts through the supervisor.
+
+### Features
+
+* add session-scoped rotating logs ([13ea545](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/13ea5456ad6845c4da4eadd6869bc6830950f2fd))
+* **daemon:** start 命令输出隧道 PID，新增 WaitForTunnelPID ([80e26c8](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/80e26c8102b913908bc1cb9c55e7442939b27b64))
+
 ## [1.2.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.1.0...v1.2.0) (2026-06-14)
 
 
