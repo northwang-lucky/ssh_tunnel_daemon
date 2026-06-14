@@ -149,13 +149,13 @@ gh pr create --base main --head "$(git branch --show-current)" --title "<type(sc
    gh pr checks --watch
    ```
 
-5. 检查通过后合并。优先使用 squash，保持 main 历史清晰：
+5. 检查通过后合并。使用仓库允许的合并方式；若仓库支持多种方式，优先沿用该仓库近期 PR 的实际合并方式：
 
    ```bash
-   gh pr merge --squash --delete-branch
+   gh pr merge --merge --delete-branch
    ```
 
-   如果仓库规则不允许 squash，根据 `gh pr view` 和错误信息选择仓库允许的合并方式；不要使用强制合并或绕过保护规则。
+   如果该方式不被仓库规则允许，根据 `gh pr view`、`gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed` 和错误信息选择仓库允许的合并方式；不要使用强制合并或绕过保护规则，除非用户明确要求使用 admin 权限。
 
 ## 4. PR 合并后更新 main
 
