@@ -192,6 +192,14 @@ func runStart(cmd *cobra.Command, args []string) error {
 		if err := config.SaveConfig(cfgPath, cfg); err != nil {
 			return err
 		}
+		// Persisted tunnels are tracked in the config file; no unsaved file needed.
+		daemon.RemoveUnsavedTunnel(stateDir, tunnel.Name)
+	} else {
+		// Track the running tunnel in the state dir so commands can resolve its
+		// metadata even though it is not in the config file.
+		if err := daemon.WriteUnsavedTunnel(stateDir, tunnel); err != nil {
+			return err
+		}
 	}
 	pid, logPath, err := daemon.StartSupervisor(stateDir, tunnel)
 	if err != nil {
@@ -205,7 +213,6 @@ func runStart(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("Tunnel %q is running (PID: %d)\n", tunnel.Name, tunnelPID)
 	}
-
 	return nil
 }
 
@@ -246,6 +253,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 			hadError = true
 			continue
 		}
+		daemon.RemoveUnsavedTunnel(stateDir, name)
 		fmt.Printf("Stopped tunnel %q\n", name)
 	}
 
@@ -273,10 +281,16 @@ var statusCmd = &cobra.Command{
 		if len(args) == 1 {
 			name := args[0]
 			t, ok := cfg.FindTunnel(name)
+			unsaved := false
 			if !ok {
-				t = config.Tunnel{Name: name}
+				if u, err := daemon.ReadUnsavedTunnel(stateDir, name); err == nil {
+					t = u
+					unsaved = true
+				} else {
+					t = config.Tunnel{Name: name}
+				}
 			}
-			status, err := daemon.GetStatus(stateDir, t)
+			status, err := daemon.GetStatus(stateDir, t, unsaved)
 			if err != nil {
 				return err
 			}
@@ -298,11 +312,28 @@ var statusCmd = &cobra.Command{
 			if seen[t.Name] {
 				continue
 			}
-			status, err := daemon.GetStatus(stateDir, t)
+			status, err := daemon.GetStatus(stateDir, t, false)
 			if err != nil {
 				continue
 			}
 			statuses = append(statuses, status)
+		}
+		// Also include unsaved tunnels that are not currently running but still
+		// have metadata in the state dir.
+		unsavedTunnels, err := daemon.ListUnsavedTunnels(stateDir)
+		if err != nil {
+			return err
+		}
+		for _, t := range unsavedTunnels {
+			if seen[t.Name] {
+				continue
+			}
+			status, err := daemon.GetStatus(stateDir, t, true)
+			if err != nil {
+				continue
+			}
+			statuses = append(statuses, status)
+			seen[t.Name] = true
 		}
 		if len(statuses) == 0 {
 			fmt.Fprintln(cmd.OutOrStdout(), "No tunnels configured.")
@@ -320,7 +351,11 @@ var statusCmd = &cobra.Command{
 				statusStr = "running"
 				pidStr = fmt.Sprintf("%d", s.PID)
 			}
-			rows = append(rows, []string{s.Name, statusStr, pidStr, s.Mode, config.FormatPorts(s.Ports)})
+			name := s.Name
+			if s.Unsaved {
+				name = name + " *"
+			}
+			rows = append(rows, []string{name, statusStr, pidStr, s.Mode, config.FormatPorts(s.Ports)})
 		}
 		widths := make([]int, len(rows[0]))
 		for _, row := range rows {
@@ -371,7 +406,12 @@ func runLog(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		name = args[0]
 	} else {
-		selected, create, err := prompt.SelectTunnel(cfg.Tunnels)
+		unsaved, err := daemon.ListUnsavedTunnels(stateDir)
+		if err != nil {
+			return err
+		}
+		candidates := append(cfg.Tunnels, unsaved...)
+		selected, create, err := prompt.SelectTunnel(candidates)
 		if err != nil {
 			return err
 		}
@@ -379,6 +419,14 @@ func runLog(cmd *cobra.Command, args []string) error {
 			return errors.New("log requires an existing tunnel")
 		}
 		name = selected.Name
+	}
+
+	// Validate the name belongs to a known tunnel (saved or unsaved) so the
+	// error message is helpful rather than "no current session log".
+	if _, ok := cfg.FindTunnel(name); !ok {
+		if _, err := daemon.ReadUnsavedTunnel(stateDir, name); err != nil {
+			return fmt.Errorf("tunnel %q not found", name)
+		}
 	}
 
 	meta, err := daemon.ReadRunMetadata(stateDir, name)

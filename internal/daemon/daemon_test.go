@@ -75,7 +75,7 @@ func TestGetStatusNotRunning(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	status, err := GetStatus(dir, config.Tunnel{Name: "web"})
+	status, err := GetStatus(dir, config.Tunnel{Name: "web"}, false)
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestGetStatusCorruptPID(t *testing.T) {
 		t.Fatalf("write pid: %v", err)
 	}
 
-	status, err := GetStatus(dir, config.Tunnel{Name: "web"})
+	status, err := GetStatus(dir, config.Tunnel{Name: "web"}, false)
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestStartTunnelRealSleep(t *testing.T) {
 		t.Errorf("log file should exist: %v", err)
 	}
 
-	status, err := GetStatus(dir, tunnel)
+	status, err := GetStatus(dir, tunnel, false)
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestStartTunnelRealSleep(t *testing.T) {
 	// Give the process a moment to exit.
 	time.Sleep(200 * time.Millisecond)
 
-	status, _ = GetStatus(dir, tunnel)
+	status, _ = GetStatus(dir, tunnel, false)
 	if status.Running {
 		t.Error("expected tunnel to be stopped")
 	}
@@ -203,7 +203,6 @@ func TestStartTunnelRealSleep(t *testing.T) {
 	// Clean up logs directory helper.
 	_ = os.RemoveAll(logDir)
 }
-
 
 func contains(s, substr string) bool {
 	return len(substr) > 0 && len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (findSubstr(s, substr)))

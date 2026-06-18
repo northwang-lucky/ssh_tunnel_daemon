@@ -24,6 +24,7 @@ type TunnelStatus struct {
 	Ports   []int
 	PID     int
 	Running bool
+	Unsaved bool // true when the tunnel is tracked only in the state dir, not the config file
 }
 
 // StartTunnel launches a new SSH tunnel for t. It returns the child PID and
@@ -69,7 +70,7 @@ func StartTunnel(stateDir string, t config.Tunnel) (int, string, error) {
 		return 0, "", err
 	}
 
-	status, err := GetStatus(stateDir, t)
+	status, err := GetStatus(stateDir, t, false)
 	if err != nil {
 		return 0, "", err
 	}
@@ -135,7 +136,7 @@ func WaitForTunnelPID(stateDir, name string, timeout time.Duration) (int, error)
 }
 
 // GetStatus returns the runtime status of t based on its pid file.
-func GetStatus(stateDir string, t config.Tunnel) (TunnelStatus, error) {
+func GetStatus(stateDir string, t config.Tunnel, unsaved bool) (TunnelStatus, error) {
 	pid, err := readPID(stateDir, t.Name)
 	if err != nil {
 		// Missing or corrupt pid file is treated as not running.
@@ -146,6 +147,7 @@ func GetStatus(stateDir string, t config.Tunnel) (TunnelStatus, error) {
 			Ports:   t.Ports,
 			PID:     0,
 			Running: false,
+			Unsaved: unsaved,
 		}, nil
 	}
 
@@ -157,12 +159,13 @@ func GetStatus(stateDir string, t config.Tunnel) (TunnelStatus, error) {
 		Ports:   t.Ports,
 		PID:     pid,
 		Running: running,
+		Unsaved: unsaved,
 	}, nil
 }
 
 // ListRunning returns the status of every tunnel that has a pid file under
-// stateDir. Missing config fields are left empty. Supervisor pid files are
-// ignored.
+// stateDir. Missing config fields are enriched from the unsaved directory.
+// Supervisor pid files are ignored.
 func ListRunning(stateDir string, cfg *config.Config) ([]TunnelStatus, error) {
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
@@ -183,10 +186,16 @@ func ListRunning(stateDir string, cfg *config.Config) ([]TunnelStatus, error) {
 		}
 		tunnelName := strings.TrimSuffix(name, ".pid")
 		t, ok := cfg.FindTunnel(tunnelName)
+		unsaved := false
 		if !ok {
-			t = config.Tunnel{Name: tunnelName}
+			if u, err := ReadUnsavedTunnel(stateDir, tunnelName); err == nil {
+				t = u
+				unsaved = true
+			} else {
+				t = config.Tunnel{Name: tunnelName}
+			}
 		}
-		status, err := GetStatus(stateDir, t)
+		status, err := GetStatus(stateDir, t, unsaved)
 		if err != nil {
 			continue
 		}
