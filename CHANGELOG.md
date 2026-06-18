@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v2.0.0...v2.1.0) (2026-06-18)
+
+
+### Features
+
+* **state:** 运行时未保存 tunnel 状态持久化到 state 目录 ([b8bf2e7](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/b8bf2e7e50b4aeb275f1f88f17bbaca1880c33cf))
+
+
+### Bug Fixes
+
+* **status:** 无参数 status 显示所有运行中 tunnel（含未保存） ([536f129](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/536f1296e95797be7c49e7b8d85898b152a0fe31))
+
 ## [2.0.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v1.2.0...v2.0.0) (2026-06-14)
 
 
