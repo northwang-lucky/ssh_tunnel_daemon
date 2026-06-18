@@ -182,7 +182,10 @@ func ListRunning(stateDir string, cfg *config.Config) ([]TunnelStatus, error) {
 			continue
 		}
 		tunnelName := strings.TrimSuffix(name, ".pid")
-		t, _ := cfg.FindTunnel(tunnelName)
+		t, ok := cfg.FindTunnel(tunnelName)
+		if !ok {
+			t = config.Tunnel{Name: tunnelName}
+		}
 		status, err := GetStatus(stateDir, t)
 		if err != nil {
 			continue

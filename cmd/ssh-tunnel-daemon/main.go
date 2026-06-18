@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -279,21 +280,32 @@ var statusCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			printStatus(status)
+			printStatus(cmd.OutOrStdout(), status)
 			return nil
 		}
 
 		var statuses []daemon.TunnelStatus
+		running, err := daemon.ListRunning(stateDir, cfg)
+		if err != nil {
+			return err
+		}
+		seen := make(map[string]bool)
+		for _, s := range running {
+			statuses = append(statuses, s)
+			seen[s.Name] = true
+		}
 		for _, t := range cfg.Tunnels {
+			if seen[t.Name] {
+				continue
+			}
 			status, err := daemon.GetStatus(stateDir, t)
 			if err != nil {
 				continue
 			}
 			statuses = append(statuses, status)
 		}
-
 		if len(statuses) == 0 {
-			fmt.Println("No tunnels configured.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No tunnels configured.")
 			return nil
 		}
 
@@ -319,15 +331,16 @@ var statusCmd = &cobra.Command{
 			}
 		}
 
+		out := cmd.OutOrStdout()
 		for _, row := range rows {
 			for i, cell := range row {
 				if i == len(row)-1 {
-					fmt.Printf("%s", cell)
+					fmt.Fprintf(out, "%s", cell)
 				} else {
-					fmt.Printf("%-*s  ", widths[i], cell)
+					fmt.Fprintf(out, "%-*s  ", widths[i], cell)
 				}
 			}
-			fmt.Println()
+			fmt.Fprintln(out)
 		}
 		return nil
 	},
@@ -388,13 +401,12 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	return logger.StreamSession(cmd.OutOrStdout(), config.DefaultLogDir(), meta.Name, meta.SessionID)
 }
-
-func printStatus(s daemon.TunnelStatus) {
+func printStatus(w io.Writer, s daemon.TunnelStatus) {
 	statusStr := "stopped"
 	if s.Running {
 		statusStr = fmt.Sprintf("running (PID %d)", s.PID)
 	}
-	fmt.Printf("Tunnel: %s\nStatus: %s\nTarget: %s\nMode:   %s\nPorts:  %s\n",
+	fmt.Fprintf(w, "Tunnel: %s\nStatus: %s\nTarget: %s\nMode:   %s\nPorts:  %s\n",
 		s.Name, statusStr, s.Target, s.Mode, config.FormatPorts(s.Ports))
 }
 

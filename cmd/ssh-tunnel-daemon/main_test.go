@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/northwang-lucky/ssh-tunnel-daemon/internal/config"
+	"github.com/spf13/cobra"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 func execute(args ...string) (string, int) {
@@ -56,6 +59,35 @@ func TestStartNoSupervisorFlagRemoved(t *testing.T) {
 	}
 	if strings.Contains(out, "no-supervisor") {
 		t.Errorf("start help should not contain --no-supervisor, got: %s", out)
+	}
+}
+
+func TestStatusListsUnsavedRunningTunnel(t *testing.T) {
+	// Cannot use t.Parallel with t.Setenv.
+
+	tmpConfig := t.TempDir()
+	tmpState := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpConfig)
+	t.Setenv("XDG_STATE_HOME", tmpState)
+
+	stateDir := config.DefaultStateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	pidPath := filepath.Join(stateDir, "orphan.pid")
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+
+	out, code := execute("status")
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; output: %s", code, out)
+	}
+	if !strings.Contains(out, "orphan") {
+		t.Errorf("expected status output to contain unsaved tunnel 'orphan', got: %s", out)
+	}
+	if !strings.Contains(out, "running") {
+		t.Errorf("expected status output to show orphan as running, got: %s", out)
 	}
 }
 
