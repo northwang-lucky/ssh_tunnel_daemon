@@ -421,7 +421,19 @@ func runLog(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		candidates := append(cfg.Tunnels, unsaved...)
+		// Deduplicate: unsaved tunnels already present in config are skipped.
+		seen := make(map[string]bool, len(cfg.Tunnels))
+		candidates := make([]config.Tunnel, 0, len(cfg.Tunnels)+len(unsaved))
+		for _, t := range cfg.Tunnels {
+			seen[t.Name] = true
+			candidates = append(candidates, t)
+		}
+		for _, t := range unsaved {
+			if seen[t.Name] {
+				continue
+			}
+			candidates = append(candidates, t)
+		}
 		selected, create, err := prompt.SelectTunnel(candidates)
 		if err != nil {
 			return err
