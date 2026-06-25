@@ -3,13 +3,14 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/northwang-lucky/ssh-tunnel-daemon/internal/config"
-	"github.com/northwang-lucky/ssh-tunnel-daemon/internal/daemon"
-	"github.com/spf13/cobra"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/northwang-lucky/ssh-tunnel-daemon/internal/config"
+	"github.com/northwang-lucky/ssh-tunnel-daemon/internal/daemon"
+	"github.com/spf13/cobra"
 )
 
 func execute(args ...string) (string, int) {
@@ -160,6 +161,55 @@ func TestStatusUnsavedStoppedStillShown(t *testing.T) {
 	}
 	if !strings.Contains(out, "stopped") {
 		t.Errorf("expected status output to show stopped state, got: %s", out)
+	}
+}
+
+func TestStatusRetryingShown(t *testing.T) {
+	// Cannot use t.Parallel with t.Setenv.
+
+	tmpConfig := t.TempDir()
+	tmpState := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpConfig)
+	t.Setenv("XDG_STATE_HOME", tmpState)
+
+	stateDir := config.DefaultStateDir()
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	tunnel := config.Tunnel{Name: "recovering", Target: "u@h", Ports: []int{5000}, Mode: "remote"}
+	if err := daemon.WriteUnsavedTunnel(stateDir, tunnel); err != nil {
+		t.Fatalf("WriteUnsavedTunnel: %v", err)
+	}
+	// Write a dead tunnel PID.
+	if err := os.WriteFile(filepath.Join(stateDir, "recovering.pid"), []byte("1"), 0o644); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+	// Write a live supervisor PID.
+	if err := os.WriteFile(filepath.Join(stateDir, "recovering.supervisor.pid"), []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+		t.Fatalf("write supervisor pid: %v", err)
+	}
+
+	out, code := execute("status")
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; output: %s", code, out)
+	}
+	if !strings.Contains(out, "recovering") {
+		t.Errorf("expected status output to contain 'recovering', got: %s", out)
+	}
+	if !strings.Contains(out, "retrying") {
+		t.Errorf("expected status output to show 'retrying' when supervisor is alive but tunnel dead, got: %s", out)
+	}
+	if strings.Contains(out, "running") {
+		t.Errorf("expected status output NOT to show 'running' for dead tunnel PID, got: %s", out)
+	}
+
+	// Also test single-tunnel status output via printStatus.
+	out2, code2 := execute("status", "recovering")
+	if code2 != 0 {
+		t.Fatalf("expected exit code 0, got %d; output: %s", code2, out2)
+	}
+	if !strings.Contains(out2, "retrying") {
+		t.Errorf("expected single status output to show 'retrying', got: %s", out2)
 	}
 }
 
