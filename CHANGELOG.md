@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.1](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v2.1.0...v2.1.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **daemon:** 修复 start 误报成功 + status 不感知重试状态的问题 ([e26a23b](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/e26a23b62e97e98a90187c4aa692fd604b138ac3))
+* **log:** 交互模式 tunnel 选项去重，避免重复展示 ([cafcf31](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/cafcf31760680ba4fd81ea0a11d39b263ed6793e))
+* **start:** 已在 config 中的 tunnel 不再写入冗余 unsaved 文件 ([070bc21](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/070bc21a2754ad6c718659b20644bf70f4242a82))
+* 修复 start 误报成功、status 不感知重试、log 选项重复、unsaved 冗余文件 ([5e4fbc0](https://github.com/northwang-lucky/ssh_tunnel_daemon/commit/5e4fbc06df6e7ecc71fcd6e2e21b25f4dc92bd2c))
+
 ## [2.1.0](https://github.com/northwang-lucky/ssh_tunnel_daemon/compare/v2.0.0...v2.1.0) (2026-06-18)
 
 
