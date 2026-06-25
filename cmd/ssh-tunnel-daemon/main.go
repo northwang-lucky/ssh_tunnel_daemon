@@ -195,7 +195,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		// Persisted tunnels are tracked in the config file; no unsaved file needed.
 		daemon.RemoveUnsavedTunnel(stateDir, tunnel.Name)
-	} else {
+	} else if _, ok := cfg.FindTunnel(tunnel.Name); !ok {
 		// Track the running tunnel in the state dir so commands can resolve its
 		// metadata even though it is not in the config file.
 		if err := daemon.WriteUnsavedTunnel(stateDir, tunnel); err != nil {
