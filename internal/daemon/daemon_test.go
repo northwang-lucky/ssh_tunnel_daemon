@@ -82,6 +82,34 @@ func TestGetStatusNotRunning(t *testing.T) {
 	if status.Running {
 		t.Error("expected not running")
 	}
+	if status.SupervisorAlive {
+		t.Error("expected supervisor not alive when no supervisor pid file")
+	}
+}
+
+func TestGetStatusRetrying(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	// Write a dead PID for the tunnel (PID 1 is init, unlikely to be our process).
+	if err := writePID(dir, "web", 1); err != nil {
+		t.Fatalf("writePID: %v", err)
+	}
+	// Write a live supervisor PID.
+	if err := writeSupervisorPID(dir, "web", os.Getpid()); err != nil {
+		t.Fatalf("writeSupervisorPID: %v", err)
+	}
+
+	status, err := GetStatus(dir, config.Tunnel{Name: "web"}, false)
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if status.Running {
+		t.Error("expected not running when tunnel pid is dead")
+	}
+	if !status.SupervisorAlive {
+		t.Error("expected supervisor alive when supervisor pid is live")
+	}
 }
 
 func TestGetStatusCorruptPID(t *testing.T) {
@@ -144,12 +172,39 @@ func TestWaitForTunnelPID(t *testing.T) {
 	if err := writePID(dir, "live", os.Getpid()); err != nil {
 		t.Fatalf("writePID: %v", err)
 	}
-	pid, err := WaitForTunnelPID(dir, "live", time.Second)
+	pid, err := WaitForTunnelPID(dir, "live", 3*time.Second)
 	if err != nil {
 		t.Fatalf("WaitForTunnelPID: %v", err)
 	}
 	if pid != os.Getpid() {
 		t.Errorf("expected pid %d, got %d", os.Getpid(), pid)
+	}
+}
+
+func TestWaitForTunnelPIDStabilization(t *testing.T) {
+	// Start a process that will be killed during stabilization to verify
+	// WaitForTunnelPID detects the death and continues polling.
+	cmd := exec.Command("sleep", "5")
+	if err := cmd.Start(); err != nil {
+		t.Skip("sleep not available")
+	}
+
+	dir := t.TempDir()
+	if err := writePID(dir, "flaky", cmd.Process.Pid); err != nil {
+		t.Fatalf("writePID: %v", err)
+	}
+
+	// Kill the process after a short delay so it dies during stabilization.
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = syscall.Kill(cmd.Process.Pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	}()
+
+	// Should timeout because the process dies during stabilization.
+	_, err := WaitForTunnelPID(dir, "flaky", 3*time.Second)
+	if err == nil {
+		t.Error("expected timeout because process died during stabilization")
 	}
 }
 
@@ -202,6 +257,25 @@ func TestStartTunnelRealSleep(t *testing.T) {
 
 	// Clean up logs directory helper.
 	_ = os.RemoveAll(logDir)
+}
+
+func TestIsSupervisorRunning(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// No supervisor PID file → not running.
+	if IsSupervisorRunning(dir, "web") {
+		t.Error("expected false when no supervisor pid file")
+	}
+
+	// Write a live supervisor PID.
+	if err := writeSupervisorPID(dir, "web", os.Getpid()); err != nil {
+		t.Fatalf("writeSupervisorPID: %v", err)
+	}
+	if !IsSupervisorRunning(dir, "web") {
+		t.Error("expected true when supervisor pid is live")
+	}
 }
 
 func contains(s, substr string) bool {

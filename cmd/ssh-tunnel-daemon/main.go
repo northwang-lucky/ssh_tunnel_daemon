@@ -61,6 +61,7 @@ var versionCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "ssh-tunnel-daemon version %s\n", version.Version)
 	},
 }
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all saved tunnels",
@@ -194,7 +195,7 @@ func runStart(cmd *cobra.Command, args []string) error {
 		}
 		// Persisted tunnels are tracked in the config file; no unsaved file needed.
 		daemon.RemoveUnsavedTunnel(stateDir, tunnel.Name)
-	} else {
+	} else if _, ok := cfg.FindTunnel(tunnel.Name); !ok {
 		// Track the running tunnel in the state dir so commands can resolve its
 		// metadata even though it is not in the config file.
 		if err := daemon.WriteUnsavedTunnel(stateDir, tunnel); err != nil {
@@ -206,13 +207,20 @@ func runStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("Started supervisor for tunnel %q (supervisor PID: %d, log: %s)\n", tunnel.Name, pid, logPath)
-	// The supervisor starts the SSH child asynchronously; wait for its PID file to appear.
-	tunnelPID, err := daemon.WaitForTunnelPID(stateDir, tunnel.Name, 5*time.Second)
+	// The supervisor starts the SSH child asynchronously; wait for its PID file to appear
+	// and then verify the process stays alive through a stabilization period.
+	_, err = daemon.WaitForTunnelPID(stateDir, tunnel.Name, 5*time.Second)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: tunnel started but failed to read its PID: %v\n", err)
-	} else {
-		fmt.Printf("Tunnel %q is running (PID: %d)\n", tunnel.Name, tunnelPID)
+		if daemon.IsSupervisorRunning(stateDir, tunnel.Name) {
+			return fmt.Errorf(
+				"tunnel %q: SSH process started but failed to stabilize; the remote port may be in use\n"+
+					"or authentication failed. Check logs: sshtnl log %s",
+				tunnel.Name, tunnel.Name,
+			)
+		}
+		return fmt.Errorf("tunnel %q did not start within 5s: %w", tunnel.Name, err)
 	}
+	fmt.Printf("Tunnel %q is running\n", tunnel.Name)
 	return nil
 }
 
@@ -350,6 +358,9 @@ var statusCmd = &cobra.Command{
 			if s.Running {
 				statusStr = "running"
 				pidStr = fmt.Sprintf("%d", s.PID)
+			} else if s.SupervisorAlive {
+				statusStr = "retrying"
+				pidStr = fmt.Sprintf("%d", s.PID)
 			}
 			name := s.Name
 			if s.Unsaved {
@@ -410,7 +421,19 @@ func runLog(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		candidates := append(cfg.Tunnels, unsaved...)
+		// Deduplicate: unsaved tunnels already present in config are skipped.
+		seen := make(map[string]bool, len(cfg.Tunnels))
+		candidates := make([]config.Tunnel, 0, len(cfg.Tunnels)+len(unsaved))
+		for _, t := range cfg.Tunnels {
+			seen[t.Name] = true
+			candidates = append(candidates, t)
+		}
+		for _, t := range unsaved {
+			if seen[t.Name] {
+				continue
+			}
+			candidates = append(candidates, t)
+		}
 		selected, create, err := prompt.SelectTunnel(candidates)
 		if err != nil {
 			return err
@@ -449,10 +472,13 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 	return logger.StreamSession(cmd.OutOrStdout(), config.DefaultLogDir(), meta.Name, meta.SessionID)
 }
+
 func printStatus(w io.Writer, s daemon.TunnelStatus) {
 	statusStr := "stopped"
 	if s.Running {
 		statusStr = fmt.Sprintf("running (PID %d)", s.PID)
+	} else if s.SupervisorAlive {
+		statusStr = "retrying (supervisor alive)"
 	}
 	fmt.Fprintf(w, "Tunnel: %s\nStatus: %s\nTarget: %s\nMode:   %s\nPorts:  %s\n",
 		s.Name, statusStr, s.Target, s.Mode, config.FormatPorts(s.Ports))

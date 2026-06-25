@@ -18,13 +18,14 @@ import (
 
 // TunnelStatus represents the runtime status of a tunnel.
 type TunnelStatus struct {
-	Name    string
-	Target  string
-	Mode    string
-	Ports   []int
-	PID     int
-	Running bool
-	Unsaved bool // true when the tunnel is tracked only in the state dir, not the config file
+	Name            string
+	Target          string
+	Mode            string
+	Ports           []int
+	PID             int
+	Running         bool
+	SupervisorAlive bool // true when the supervisor process is alive (used to show "retrying" when tunnel PID is dead)
+	Unsaved         bool // true when the tunnel is tracked only in the state dir, not the config file
 }
 
 // StartTunnel launches a new SSH tunnel for t. It returns the child PID and
@@ -121,45 +122,72 @@ func StopTunnel(stateDir, name string) error {
 	return nil
 }
 
-// WaitForTunnelPID polls the pid file for name until a live PID appears or
-// timeout elapses. Returns the tunnel PID on success.
+// WaitForTunnelPID polls the pid file for name until a live PID appears, then
+// waits a short stabilization period and re-verifies before returning.
+// This avoids false positives when the SSH process starts but exits immediately
+// (e.g. remote port already in use).
 func WaitForTunnelPID(stateDir, name string, timeout time.Duration) (int, error) {
+	const stabilizationPeriod = 1500 * time.Millisecond
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		pid, err := readPID(stateDir, name)
 		if err == nil && isProcessAlive(pid) {
-			return pid, nil
+			remaining := time.Until(deadline)
+			if remaining < stabilizationPeriod {
+				return pid, nil
+			}
+			time.Sleep(stabilizationPeriod)
+			pid2, err2 := readPID(stateDir, name)
+			if err2 == nil && isProcessAlive(pid2) {
+				return pid2, nil
+			}
+			// Process died or PID changed during stabilization; retry polling.
+			continue
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	return 0, fmt.Errorf("tunnel %q did not start within %v", name, timeout)
 }
 
-// GetStatus returns the runtime status of t based on its pid file.
+// IsSupervisorRunning returns true when a supervisor process for name is alive.
+func IsSupervisorRunning(stateDir, name string) bool {
+	pid, err := readSupervisorPID(stateDir, name)
+	if err != nil {
+		return false
+	}
+	return isProcessAlive(pid)
+}
+
+// GetStatus returns the runtime status of t based on its pid file and supervisor state.
 func GetStatus(stateDir string, t config.Tunnel, unsaved bool) (TunnelStatus, error) {
+	supervisorAlive := IsSupervisorRunning(stateDir, t.Name)
+
 	pid, err := readPID(stateDir, t.Name)
 	if err != nil {
 		// Missing or corrupt pid file is treated as not running.
 		return TunnelStatus{
-			Name:    t.Name,
-			Target:  t.Target,
-			Mode:    t.Mode,
-			Ports:   t.Ports,
-			PID:     0,
-			Running: false,
-			Unsaved: unsaved,
+			Name:            t.Name,
+			Target:          t.Target,
+			Mode:            t.Mode,
+			Ports:           t.Ports,
+			PID:             0,
+			Running:         false,
+			SupervisorAlive: supervisorAlive,
+			Unsaved:         unsaved,
 		}, nil
 	}
 
 	running := pid != 0 && isProcessAlive(pid)
 	return TunnelStatus{
-		Name:    t.Name,
-		Target:  t.Target,
-		Mode:    t.Mode,
-		Ports:   t.Ports,
-		PID:     pid,
-		Running: running,
-		Unsaved: unsaved,
+		Name:            t.Name,
+		Target:          t.Target,
+		Mode:            t.Mode,
+		Ports:           t.Ports,
+		PID:             pid,
+		Running:         running,
+		SupervisorAlive: supervisorAlive,
+		Unsaved:         unsaved,
 	}, nil
 }
 
